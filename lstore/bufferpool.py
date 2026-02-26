@@ -22,6 +22,7 @@ class BufferPool:
         self.frames = {}  # key: key value: BufferFrame
         # LRU order: oldest at front and newest at end
         self.lru = OrderedDict()
+        self.dirty_keys = set()
 
     @staticmethod
     def make_key(table_name, is_tail, column, page_index):
@@ -93,6 +94,7 @@ class BufferPool:
         if frame is None:
             return False
         frame.dirty = True
+        self.dirty_keys.add(key)     # To track dirty frames 
         self._touch(key)
         return True
     
@@ -126,19 +128,29 @@ class BufferPool:
     def flush_page(self, key):
         frame = self.frames.get(key)
         if frame is None:
+            self.dirty_keys.discard(key)
             return False
         if not frame.dirty:
+            self.dirty_keys.discard(key)
             return True
+    
         table_name, is_tail, column, page_index = key
-        self.disk_manager.write_page(table_name, is_tail, column, page_index, frame.data, frame.num_records)
+        self.disk_manager.write_page(
+            table_name, is_tail, column, page_index,
+            frame.data, frame.num_records
+        )
         frame.dirty = False
+        self.dirty_keys.discard(key)
         return True
 
     def flush_all(self, table_name=None):
-        keys = list(self.frames.keys())
+        # To Only flush dirty frames.
+        if table_name is None:
+            keys = list(self.dirty_keys)
+        else:
+            keys = [k for k in self.dirty_keys if k[0] == table_name]
+    
         for key in keys:
-            if table_name is not None and key[0] != table_name:
-                continue
             self.flush_page(key)
         return True
 
