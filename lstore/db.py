@@ -30,7 +30,7 @@ class Database():
         if self.bufferpool is not None:
             self.bufferpool.flush_all()
         for table in self.tables:
-            table.save(self.disk_manager)
+            table.save_metadata(self.disk_manager)   # Change to new lightweight method
     """
     # Creates a new table
     :param name: string         #Table name
