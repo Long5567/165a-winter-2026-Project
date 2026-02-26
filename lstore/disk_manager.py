@@ -11,13 +11,20 @@ class DiskManager():
     def __init__(self, path):
         self.path = path
         os.makedirs(path, exist_ok=True)
+        self._ensured_dirs = set()
+
+    def _ensure_dir(self, path):
+        if path in self._ensured_dirs:
+            return
+        os.makedirs(path, exist_ok=True)
+        self._ensured_dirs.add(path)
 
     def write_page(self, table_name, is_tail, column, page_index, data, num_records):
         table_path = os.path.join(self.path, table_name)
         page_type = "tail" if is_tail else "base"
         type_path = os.path.join(table_path, page_type)
         col_path = os.path.join(type_path, str(column))
-        os.makedirs(col_path, exist_ok=True)
+        self._ensure_dir(col_path)
 
         # raw page bytes
         file_path = os.path.join(col_path, str(page_index) + ".bin")
