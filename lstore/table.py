@@ -73,8 +73,7 @@ class Table:
         self._merge_request = threading.Event()
         self._merge_stop = threading.Event()
         self._pending_merge_jobs = []
-        self._merge_thread = threading.Thread(target=self._merge_worker, daemon=True)
-        self._merge_thread.start()
+        self._merge_thread = None
 
     def bind_storage(self, bufferpool, disk_manager):
         self.bufferpool = bufferpool
@@ -182,6 +181,10 @@ class Table:
             return
         self._tail_pages_created_since_merge += 1
         if self._tail_pages_created_since_merge >= self.merge_tail_page_threshold:
+            if self._merge_thread is None:
+                self._merge_stop.clear()
+                self._merge_thread = threading.Thread(target=self._merge_worker, daemon=True)
+                self._merge_thread.start()
             self._merge_request.set()
 
     def _get_or_allocate_tail_page(self, range_index, column):
