@@ -88,6 +88,24 @@ class Table:
         if self.bufferpool is None:
             return
         self.bufferpool.unpin_page(self.name, is_tail, column, page_index)
+        
+    def _read_cells_same_page(self, is_tail, column, page_index, offsets):
+        """
+        To Read multiple int64 values from the same physical page.
+        """
+        frame = self._fetch_frame(is_tail, column, page_index, pin=True)
+        if frame is None:
+            return [None] * len(offsets)
+        try:
+            out = []
+            for off in offsets:
+                if off is None or off < 0 or off >= frame.num_records:
+                    out.append(None)
+                else:
+                    out.append(struct.unpack_from(">q", frame.data, off * INT_SIZE)[0])
+            return out
+        finally:
+            self._unpin(is_tail, column, page_index)
 
     def _read_cell(self, is_tail, column, page_index, offset):
         frame = self._fetch_frame(is_tail, column, page_index, pin=True)
@@ -408,27 +426,27 @@ class Table:
         direction = self.page_directory.get(rid)
         if direction is None:
             return None
-        record = []
-        if self.is_rid_tail_helper(rid):
-            for i in range(len(direction)):
-                col_index = direction[i]
-                if col_index[0] == 'N':
-                    value = None
-                elif col_index[4] is None:
-                    value = None
-                else:
-                    value = self._read_cell(True, i, col_index[3], col_index[4])
-                record.append(value)
-        else:
-             for i in range(len(direction)):
-                col_index = direction[i]
-                if col_index[0] == 'N':
-                    value = None
-                elif col_index[4] is None:
-                    value = None
-                else:
-                    value = self._read_cell(False, i, col_index[3], col_index[4])
-                record.append(value)
+    
+        is_tail = self.is_rid_tail_helper(rid)
+    
+        # Group reads by (column_id, page_index)
+        groups = {}  
+        record = [None] * len(direction)
+    
+        for i, entry in enumerate(direction):
+            mark, col_id, _range, page_index, offset = entry
+            if mark == 'N' or offset is None:
+                record[i] = None
+                continue
+            groups.setdefault((col_id, page_index), []).append((i, offset))
+    
+        for (col_id, page_index), reqs in groups.items():
+            positions = [pos for (pos, _off) in reqs]
+            offsets = [off for (_pos, off) in reqs]
+            values = self._read_cells_same_page(is_tail, col_id, page_index, offsets)
+            for pos, val in zip(positions, values):
+                record[pos] = val
+    
         return record
     
     def read_latest_record(self, base_rid):
